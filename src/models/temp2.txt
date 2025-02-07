@@ -1,0 +1,159 @@
+import pool from "../config/database";
+
+interface Address {
+    address_id: number;
+    user_id: number;
+    street: string;
+    city: string;
+    state: string;
+    country: string;
+    postal_code: string;
+    is_default: boolean;
+    type: "home" | "work" | "other";
+}
+
+export const addAddress = async (address: Address) => {
+    try {
+        const { user_id, street, city, state, country, postal_code, is_default, type } = address;
+
+        if (is_default) {
+            const result = await pool.query(`SELECT is_default FROM addresses WHERE user_id=$1`, [user_id]);
+            if (result.rows.length > 0) {
+                await pool.query(`UPDATE addresses SET is_default=false WHERE user_id=$1`, [user_id]);
+            }
+        }
+
+        const result = await pool.query(
+            `INSERT INTO addresses (user_id, street, city, state, country, postal_code, is_default, type) 
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *`,
+            [user_id, street, city, state, country, postal_code, is_default, type]
+        );
+
+        return { error: false, message: "Address added successfully", data: result.rows[0] };
+    } catch (error) {
+        console.log(error);
+        return { error: true, message: "Error adding address", data: {} };
+    }
+};
+
+export const getAllAddress = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT street, city, state, country, postal_code, is_default, type FROM addresses WHERE user_id=$1`,
+            [userId]
+        );
+        return { error: false, message: "Addresses retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.log(error);
+        return { error: true, message: "Error finding addresses", data: [] };
+    }
+};
+
+export const getAddressById = async (addressId: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT street, city, state, country, postal_code, is_default, type FROM addresses WHERE address_id=$1`,
+            [addressId]
+        );
+        if (result.rows.length > 0) {
+            return { error: false, message: "Address retrieved successfully", data: result.rows[0] };
+        }
+        return { error: true, message: "Address not found", data: {} };
+    } catch (error) {
+        console.log(error);
+        return { error: true, message: "Error finding address", data: {} };
+    }
+};
+
+// export const updateAddress = async (userId: number, addressId: number, updates: any) => {
+//     try {
+//         const fields = Object.keys(updates);
+//         const values = Object.values(updates);
+
+//         if (fields.length === 0) {
+//             return { error: true, message: "No fields to update", data: {} };
+//         }
+
+//         const setClause = fields.map((field, index) => `${field} = $${index + 2}`).join(", ");
+
+//         const query = `
+//             UPDATE addresses 
+//             SET ${setClause}
+//             WHERE address_id = $1 AND user_id = $${fields.length + 2}
+//             RETURNING *;
+//         `;
+
+//         const result = await pool.query(query, [addressId, ...values, userId]);
+
+//         if (result.rows.length > 0) {
+//             return { error: false, message: "Address updated successfully", data: result.rows[0] };
+//         } else {
+//             return { error: true, message: "Address not found or not updated", data: {} };
+//         }
+//     } catch (error) {
+//         console.error("Error in updateAddressService:", error);
+//         return { error: true, message: "Could not update address", data: {} };
+//     }
+// };
+
+export const updateAddress = async (userId: number,addressId: number,updates: Partial<Address>) => {
+    try {
+        const query = `
+            UPDATE addresses 
+            SET 
+                street = COALESCE($2, street),
+                city = COALESCE($3, city),
+                state = COALESCE($4, state),
+                country = COALESCE($5, country),
+                postal_code = COALESCE($6, postal_code),
+                is_default = COALESCE($7, is_default),
+                type = COALESCE($8, type)
+            WHERE address_id = $1 AND user_id = $9
+            RETURNING *;
+        `;
+
+        const values = [
+            addressId,
+            updates.street ?? null,
+            updates.city ?? null,
+            updates.state ?? null,
+            updates.country ?? null,
+            updates.postal_code ?? null,
+            updates.is_default ?? null,
+            updates.type ?? null,
+            userId,
+        ];
+
+        const result = await pool.query(query, values);
+
+        if (result.rows.length > 0) {
+            return { error: false, message: "Address updated successfully", data: result.rows[0] };
+        } else {
+            return { error: true, message: "Address not found or not updated", data: {} };
+        }
+    } catch (error) {
+        console.error("Error in updateAddress:", error);
+        return { error: true, message: "Could not update address", data: {} };
+    }
+};
+
+
+export const deleteAddress = async (userId: number, addressId: number) => {
+    try {
+        const query = `
+            DELETE FROM addresses WHERE address_id=$1 AND user_id=$2
+            RETURNING *;
+        `;
+
+        const result = await pool.query(query, [addressId, userId]);
+
+        if (result.rows.length > 0) {
+            return { error: false, message: "Address deleted successfully", data: result.rows[0] };
+        } else {
+            return { error: true, message: "Address not found or not deleted", data: {} };
+        }
+    } catch (error) {
+        console.error("Error in deleteAddressService:", error);
+        return { error: true, message: "Could not delete address", data: {} };
+    }
+};

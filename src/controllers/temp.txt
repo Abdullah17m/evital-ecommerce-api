@@ -1,0 +1,545 @@
+import { Request, Response } from "express";
+import {
+    createCategory,
+    getAllCategories,
+    getCategoryById,
+    updateCategory,
+    deleteCategory
+} from "../models/categoryModel";
+
+export const createCategoryController = async (req: Request, res: Response): Promise<void> => {
+    const { name } = req.body;
+
+    if (!name) {
+        res.status(400).json({ message: "Category name is required" });
+        return;
+    }
+
+    try {
+        const newCategory = await createCategory(name);
+        res.status(201).json({ message: "Category created", category: newCategory });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const getAllCategoriesController = async (req: Request, res: Response): Promise<void> => {
+    try {
+        const categories = await getAllCategories();
+        res.json(categories);
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const getCategoryByIdController = async (req: Request, res: Response): Promise<void> => {
+    const category_id = parseInt(req.params.id);
+
+    if (isNaN(category_id)) {
+        res.status(400).json({ message: "Invalid category ID" });
+        return;
+    }
+
+    try {
+        const category = await getCategoryById(category_id);
+        if (!category) {
+            res.status(404).json({ message: "Category not found" });
+            return;
+        }
+        res.json(category);
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const updateCategoryController = async (req: Request, res: Response): Promise<void> => {
+    const category_id = parseInt(req.params.id);
+    const { name } = req.body;
+
+    if (isNaN(category_id)) {
+        res.status(400).json({ message: "Invalid category ID" });
+        return;
+    }
+
+    try {
+        const updatedCategory = await updateCategory(category_id, name);
+        if (!updatedCategory) {
+            res.status(404).json({ message: "Category not found" });
+            return;
+        }
+        res.json({ message: "Category updated successfully", category: updatedCategory });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const deleteCategoryController = async (req: Request, res: Response): Promise<void> => {
+    const category_id = parseInt(req.params.id);
+
+    if (isNaN(category_id)) {
+        res.status(400).json({ message: "Invalid category ID" });
+        return;
+    }
+
+    try {
+        const deletedCategory = await deleteCategory(category_id);
+        if (!deletedCategory) {
+            res.status(404).json({ message: "Category not found" });
+            return;
+        }
+        res.json({ message: "Category deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+import { Request, Response } from "express";
+import { AuthenticatedRequest } from "../types/express";
+import { addProductCart, createCart, deleteCart, deleteProductCart, getAllCarts, getCartItemsById, updateCart } from "../models/cartModel";
+
+
+
+export const getAllCartsController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        
+        const userId = req.user?.userId; 
+       
+        const allCarts = await getAllCarts(userId);
+        res.status(201).json({ message: "Carts fetched successfully", carts: allCarts });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const createCartController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        
+        const userId = req.user?.userId; 
+       
+        const cart = await createCart(userId);
+        res.status(201).json({ message: "Cart created successfully", cart: cart });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const addProductCartController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        const cart = await addProductCart(req.body);
+        res.status(201).json({ message: "Product added successfully", cart: cart });
+    } catch (error:any) {
+        console.log(error);
+        res.status(500).json({ message: error.message || "Internal Server Error"});
+    }
+};
+
+export const updateProductCartController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const cartId = parseInt(req.params.id);
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        req.body.cart_id = cartId;
+        const cart = await updateCart(req.body);
+        res.status(201).json({ message: "Cart updated successfully", cart: cart });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const deleteProductCartController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const cartId = parseInt(req.params.id);
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        req.body.cart_id = cartId;
+        const cart = await deleteProductCart(req.body);
+        res.status(201).json({ message: "product deleted successfully", cart: cart });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const deleteCartController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+       
+        const cart = await deleteCart(req.body);
+        res.status(201).json({ message: "cart cleared successfully", cart: cart.data });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const getCartByIdController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        const cartId = parseInt(req.params.id);
+        const cart = await getCartItemsById(cartId,userId);
+        res.status(201).json({ message: "cart details", cart: cart });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+import { Request, Response } from "express";
+import { createDiscount, getAllDiscounts, getDiscountById, updateDiscount, deleteDiscount } from "../models/discountModel";
+
+// Create Discount
+export const createDiscountController = async (req: Request, res: Response) => {
+    try {
+        const discount = await createDiscount(req.body);
+        res.status(201).json({ message: "Discount created successfully", discount });
+    } catch (error) {
+        res.status(500).json({ message: error });
+    }
+};
+
+// Get All Discounts
+export const getAllDiscountsController = async (_req: Request, res: Response) => {
+    try {
+        const discounts = await getAllDiscounts();
+        res.status(200).json({ discounts });
+    } catch (error) {
+        res.status(500).json({ message: error });
+    }
+};
+
+// Get Discount by ID
+export const getDiscountByIdController = async (req: Request, res: Response):Promise<void> => {
+    try {
+        const discount = await getDiscountById(Number(req.params.id));
+        if (!discount){
+            res.status(404).json({ message: "Discount not found" }); 
+            return;
+        }  
+        res.status(200).json({ discount });
+    } catch (error) {
+        res.status(500).json({ message: error });
+    }
+};
+
+// Update Discount
+export const updateDiscountController = async (req: Request, res: Response):Promise<void> => {
+    try {
+        const updatedDiscount = await updateDiscount(Number(req.params.id), req.body);
+        if (!updatedDiscount){
+             res.status(404).json({ message: "Discount not found" });
+             return;
+        } 
+        res.status(200).json({ message: "Discount updated successfully", discount: updatedDiscount });
+    } catch (error) {
+        res.status(500).json({ message: error });
+    }
+};
+
+// Delete Discount
+export const deleteDiscountController = async (req: Request, res: Response):Promise<void> => {
+    try {
+        const deletedDiscount = await deleteDiscount(Number(req.params.id));
+        if (!deletedDiscount){
+            res.status(404).json({ message: "Discount not found" });
+            return;
+        } 
+        res.status(200).json({ message: "Discount deleted successfully" });
+    } catch (error) {
+        res.status(500).json({ message: error });
+    }
+};
+
+
+
+import { Request, Response } from "express";
+import { AuthenticatedRequest } from "../types/express";
+import { cancelOrder, createUserOrder, getAllOrders, getAllUserOrders, getOrdersById, updateOrderStatus } from "../models/orderModel";
+
+
+
+
+export const getAllUserOrdersController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        const orders = await getAllUserOrders(userId);
+        res.status(201).json({ message: "order Details", orders: orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const createOrdersController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        
+         const orders = await createUserOrder(req.body);
+        res.status(201).json({ message: "order Details", orders:orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const getOrderByIdController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+        
+         const orders = await getOrdersById(userId,req.body.order_id);
+        res.status(201).json({ message: "order Details", orders:orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+export const getAdminOrdersController = async (req: Request, res: Response) => {
+    try {
+      
+      
+         const orders = await getAllOrders();
+        res.status(201).json({ message: "order Details", orders:orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const updateOrderStatusController = async (req:Request, res: Response) => {
+    try {
+      
+      
+         const orders = await updateOrderStatus(req.body);
+        res.status(201).json({ message: "order Details", orders:orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+export const cancelOrderController = async (req:AuthenticatedRequest, res: Response) => {
+    try {
+      
+        const userId = req.user?.userId; 
+        req.body.user_id = userId;
+         const orders = await cancelOrder(userId,req.body.order_id);
+        res.status(201).json({ message: "order Details", orders:orders });
+    } catch (error) {
+        console.log(error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+// Delete a return request
+// export const deleteReturnRequestController = async (req: Request, res: Response) => {
+//     try {
+//         const { returnId } = req.params;
+//         const message = await deleteReturnRequest(Number(returnId));
+//         res.status(200).json(message);
+//     } catch (error) {
+//         console.error("Error deleting return request:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//     }
+// };
+
+// // Add return items to a return request
+// export const addReturnItemsController = async (req: Request, res: Response) => {
+//     try {
+//         const { returnId } = req.params;
+//         const items = req.body.items;
+//         const newReturnItems = await addReturnItems(Number(returnId), items);
+//         res.status(201).json({ message: "Return items added successfully", returnItems: newReturnItems });
+//     } catch (error) {
+//         console.error("Error adding return items:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//     }
+// };
+
+
+// Update return item status
+// export const updateReturnItemStatusController = async (req: Request, res: Response) => {
+//     try {
+//         const { returnItemId } = req.params;
+//         const { status } = req.body;
+//         const updatedReturnItem = await updateReturnItemStatus(Number(returnItemId), status);
+//         res.status(200).json({ message: "Return item status updated successfully", returnItem: updatedReturnItem });
+//     } catch (error) {
+//         console.error("Error updating return item status:", error);
+//         res.status(500).json({ error: "Internal Server Error" });
+//     }
+// };
+
+import { Request, Response } from "express";
+import {
+    createReturnRequest,
+    getAllReturns,
+    getReturnDetails,
+    updateReturnStatus,
+   
+    getReturnItems,
+
+} from "../models/returnModel";
+import { AuthenticatedRequest } from "../types/express";
+
+
+export const createReturnRequestController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const user_id = req.user?.userId;
+        const { returnRequest, returnItems } = req.body;
+
+        // Ensure user_id is attached to the return request
+        returnRequest.user_id = user_id;
+
+        // Call the function to create the return request and return items
+        const newReturn = await createReturnRequest(returnRequest, returnItems);
+
+        res.status(201).json({
+            message: "Return request created successfully",
+            return: newReturn,
+        });
+    } catch (error) {
+        console.error("Error creating return request:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+
+// Get all return requests User
+export const getAllReturnsController = async (_req: Request, res: Response) => {
+    try {
+        const returns = await getAllReturns();
+        res.status(200).json(returns);
+    } catch (error) {
+        console.error("Error fetching return requests:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+// Get return details by return ID
+export const getReturnDetailsController = async (req: Request, res: Response) => {
+    try {
+        const { returnId } = req.body;
+        const returnDetails = await getReturnDetails(Number(returnId));
+        res.status(200).json(returnDetails);
+    } catch (error) {
+        console.error("Error fetching return details:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+// Update return request status (admin)
+export const updateReturnStatusController = async (req: Request, res: Response) => {
+    try {
+        
+        const { status,returnId } = req.body;
+        const updatedReturn = await updateReturnStatus(returnId, status);
+        res.status(200).json({ message: "Return status updated successfully", return: updatedReturn });
+    } catch (error) {
+        console.error("Error updating return status:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+
+
+// Get return items for a specific return request
+export const getReturnItemsController = async (req: AuthenticatedRequest, res: Response) => {
+    try {
+        const { returnId } = req.body;
+        const user_id = req.user?.userId;
+        const returnItems = await getReturnItems(Number(returnId),user_id);
+        res.status(200).json(returnItems);
+    } catch (error) {
+        console.error("Error fetching return items:", error);
+        res.status(500).json({ error: "Internal Server Error" });
+    }
+};
+
+
+
+import { Request, Response } from "express";
+import { AuthenticatedRequest } from "../types/express";
+import { getAllUsersService, getUserByIdService, updateUserService } from "../models/userModel";
+
+
+
+
+export const getAllUsers = async (req: Request, res: Response) => {
+  try {
+    const user = await getAllUsersService();
+    res.status(201).json({ message: "All users:", user });
+  } catch (error: any) {
+    res.status(400).json({ message: error.message });
+  }
+};
+
+
+export const getUserByid = async (req: Request, res: Response): Promise<void> => {
+    const userId = parseInt(req.params.id);
+
+    if (isNaN(userId)) {
+        res.status(400).json({ message: "Invalid user ID" });
+        return;
+    }
+
+    try {
+        const user = await getUserByIdService(userId);
+
+        if (!user) {
+            res.status(404).json({ message: "User not found" });
+            return;
+        }
+
+        res.json(user);
+    } catch (error) {
+        console.error("Error fetching user:", error);
+        res.status(500).json({ message: "Internal Server Error" });
+    }
+};
+
+
+export const updateUserController = async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    const userId = parseInt(req.params.id);
+    const { name } = req.body;
+
+    if (isNaN(userId)) {
+        res.status(400).json({ message: "Invalid user ID" });
+        return;
+    }
+
+    try {
+        const updatedUser = await updateUserService(userId,name);
+
+        if (!updatedUser) {
+            res.status(404).json({ message: "User not found" });
+            return;
+        }
+
+        res.json({ message: "User updated successfully", user: updatedUser });
+    } catch (error:any) {
+        res.status(400).json({ message: error.message });
+    }
+};
