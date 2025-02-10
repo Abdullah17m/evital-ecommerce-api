@@ -39,6 +39,114 @@ export const updateProductSchema = Joi.object({
 
 
 
+const searchAndFilterSchema = Joi.object({
+    name: Joi.string()
+        .trim()
+        .min(1)
+        .max(255)
+        .optional()
+        .messages({
+            "string.base": "Name must be a string.",
+            "string.min": "Name must be at least 1 character long.",
+            "string.max": "Name cannot exceed 255 characters."
+        }),
+
+    min_price: Joi.number()
+        .min(0)
+        .optional()
+        .messages({
+            "number.base": "Minimum price must be a number.",
+            "number.min": "Minimum price cannot be negative."
+        }),
+
+    max_price: Joi.number()
+        .min(0)
+        .greater(Joi.ref("min_price"))
+        .optional()
+        .messages({
+            "number.base": "Maximum price must be a number.",
+            "number.min": "Maximum price cannot be negative.",
+            "number.greater": "Maximum price must be greater than minimum price."
+        }),
+
+    min_stock: Joi.number()
+        .integer()
+        .min(0)
+        .optional()
+        .messages({
+            "number.base": "Minimum stock must be a number.",
+            "number.integer": "Minimum stock must be an integer.",
+            "number.min": "Minimum stock cannot be negative."
+        }),
+
+    category_id: Joi.number()
+        .integer()
+        .positive()
+        .optional()
+        .messages({
+            "number.base": "Category ID must be a number.",
+            "number.integer": "Category ID must be an integer.",
+            "number.positive": "Category ID must be a positive number."
+        }),
+
+    min_rating: Joi.number()
+        .min(0)
+        .max(5)
+        .optional()
+        .messages({
+            "number.base": "Minimum rating must be a number.",
+            "number.min": "Minimum rating cannot be negative.",
+            "number.max": "Minimum rating cannot exceed 5."
+        }),
+
+    page: Joi.number()
+        .integer()
+        .min(1)
+        .optional()
+        .default(1)
+        .messages({
+            "number.base": "Page must be a number.",
+            "number.integer": "Page must be an integer.",
+            "number.min": "Page number must be at least 1."
+        }),
+
+    limit: Joi.number()
+        .integer()
+        .min(1)
+        .max(100)
+        .optional()
+        .default(10)
+        .messages({
+            "number.base": "Limit must be a number.",
+            "number.integer": "Limit must be an integer.",
+            "number.min": "Limit must be at least 1.",
+            "number.max": "Limit cannot exceed 100."
+        }),
+
+    sort_by: Joi.object({
+        name: Joi.string()
+            .valid("name", "price", "stock", "average_rating", "created_at")
+            .required()
+            .messages({
+                "any.only": "Sort column must be one of: name, price, stock, average_rating, created_at.",
+                "any.required": "Sort column is required if sorting is applied."
+            }),
+
+        type: Joi.string()
+            .valid("ASC", "DESC")
+            .required()
+            .messages({
+                "any.only": "Sort type must be either 'ASC' or 'DESC'.",
+                "any.required": "Sort type is required if sorting is applied."
+            })
+    }).optional()
+});
+
+export default searchAndFilterSchema;
+
+
+
+
 export const categorySchema = Joi.object({
     name: Joi.string().min(2).max(255).required().messages({
         "string.base": "Category name must be a string",

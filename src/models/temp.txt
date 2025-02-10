@@ -1490,3 +1490,53 @@ export const getReturnItems = async (return_id: number, user_id: number) => {
 };
 
 
+import  pool  from "../config/database";
+
+
+export const getAllUsersService = async () => {
+    try {
+        const result = await pool.query("SELECT first_name, last_name, email, role FROM users");
+        return result.rows;
+    } catch (error) {
+        console.error("Error fetching users:", error);
+        throw new Error("Could not retrieve users");
+    }
+};
+
+export const getUserByIdService = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            "SELECT first_name, last_name, dob FROM users WHERE user_id = $1",
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return null; // User not found
+        }
+
+        return result.rows[0];
+    } catch (error) {
+        console.error("Error fetching user by ID:", error);
+        throw new Error("Could not retrieve user");
+    }
+};
+
+
+export const updateUserService = async (userId: number, name?: string) => {
+    try {
+        const result = await pool.query(
+            `UPDATE users 
+             SET last_name = COALESCE($2, last_name) 
+             WHERE user_id = $1 
+             RETURNING last_name, email, role`,
+            [userId, name]
+        );
+
+        return result.rows.length > 0 ? result.rows[0] : null;
+    } catch (error) {
+        console.error("Error updating user:", error);
+        throw new Error("Could not update user");
+    }
+};
+
+

@@ -19,7 +19,7 @@ export const authenticate = (req: AuthenticatedRequest, res: Response, next: Nex
     next();
   } catch (error) {
      res.status(401).json({ message: "Unauthorized: Invalid token" });
-     return
+     return;
   }
 };
 

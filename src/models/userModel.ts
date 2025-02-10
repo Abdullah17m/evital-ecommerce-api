@@ -1,84 +1,75 @@
-import pool from "../config/database";
+import { executeQuery, formatResponse } from "../utils/helper";
 
-export const getAllUsersService = async () => {
-    try {
-        const result = await pool.query("SELECT first_name, last_name, email, role FROM users");
-        
-        return {
-            error: false,
-            message: "Users retrieved successfully",
-            data: result.rows,
-        };
-    } catch (error) {
-        console.error("Error fetching users:", error);
-        return {
-            error: true,
-            message: "Could not retrieve users",
-            data: null,
-        };
+export class UserService {
+    
+    // Get all users (excluding sensitive data)
+    async getAllUsers() {
+        const users = await executeQuery("SELECT first_name, last_name, email, role FROM users");
+        return formatResponse(false, "Users retrieved successfully", users.data);
     }
-};
 
-export const getUserByIdService = async (userId: number) => {
-    try {
-        const result = await pool.query(
+    // Get user by ID
+    async getUserById(userId: number) {
+        const result = await executeQuery(
             "SELECT first_name, last_name, dob FROM users WHERE user_id = $1",
             [userId]
         );
 
-        if (result.rows.length === 0) {
-            return {
-                error: true,
-                message: "User not found",
-                data: null,
-            };
+        if (!result.data || result.data.length === 0) {
+            return formatResponse(true, "User not found", null);
         }
 
-        return {
-            error: false,
-            message: "User retrieved successfully",
-            data: result.rows[0],
-        };
-    } catch (error) {
-        console.error("Error fetching user by ID:", error);
-        return {
-            error: true,
-            message: "Could not retrieve user",
-            data: null,
-        };
+        return formatResponse(false, "User retrieved successfully", result.data[0]);
     }
-};
 
-export const updateUserService = async (userId: number, firstName?: string, lastName?: string) => {
-    try {
-        const result = await pool.query(
-            `UPDATE users 
-             SET first_name = COALESCE($2, first_name), 
-                 last_name = COALESCE($3, last_name) 
-             WHERE user_id = $1 
-             RETURNING first_name, last_name, email, role`,
-            [userId, firstName, lastName]
-        );
+    // Update user details (first name, last name)
+    // async updateUser(userId: number, firstName?: string, lastName?: string) {
+    //     const result = await executeQuery(
+    //         `UPDATE users 
+    //          SET first_name = COALESCE($2, first_name), 
+    //              last_name = COALESCE($3, last_name) 
+    //          WHERE user_id = $1 
+    //          RETURNING first_name, last_name, email, role`,
+    //         [userId, firstName, lastName]
+    //     );
 
-        if (result.rows.length === 0) {
-            return {
-                error: true,
-                message: "User not found or no changes applied",
-                data: null,
-            };
+    //     if (!result.data || result.data.length === 0) {
+    //         return formatResponse(true, "User not found or no changes applied", null);
+    //     }
+
+    //     return formatResponse(false, "User updated successfully", result.data[0]);
+    // }
+    async updateUser(userId: number, updates: Partial<{ first_name: string; last_name: string }>) {
+        try {
+            if (Object.keys(updates).length === 0) {
+                return formatResponse(true, "No updates provided");
+            }
+    
+            let setClause = Object.entries(updates)
+                .map(([key], index) => `${key} = $${index + 1}`)
+                .join(", ");
+    
+            setClause += ", updated_at = NOW()"; // Add timestamp update
+    
+            const values = [...Object.values(updates), userId]; // Append userId for WHERE clause
+    
+            const query = `
+                UPDATE users 
+                SET ${setClause} 
+                WHERE user_id = $${values.length} 
+                RETURNING first_name, last_name, email, role;
+            `;
+    
+            const result = await executeQuery(query, values);
+    
+            if (!result.data || result.data.length === 0) {
+                return formatResponse(true, "User not found or no changes applied", null);
+            }
+    
+            return formatResponse(false, "User updated successfully", result.data[0]);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
         }
-
-        return {
-            error: false,
-            message: "User updated successfully",
-            data: result.rows[0],
-        };
-    } catch (error) {
-        console.error("Error updating user:", error);
-        return {
-            error: true,
-            message: "Could not update user",
-            data: null,
-        };
     }
-};
+    
+}

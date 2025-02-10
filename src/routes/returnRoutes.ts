@@ -4,15 +4,16 @@ import {
     getAllReturnsController,
     getReturnDetailsController,
     updateReturnStatusController,
-   
-    getReturnItemsController,
+    getReturnItemsController
    
 } from "../controllers/returnController";
 import { authenticate, adminAuth } from "../middlewares/authMiddleware";
+import { validateRequest } from "../middlewares/validateRequest";
+import returnRequestSchema from "../middlewares/returnValidation";
 
 const router = express.Router();
 
-router.post("/", authenticate, createReturnRequestController);
+router.post("/", authenticate,validateRequest(returnRequestSchema), createReturnRequestController);
 router.get("/", authenticate, adminAuth, getAllReturnsController);
 router.get("/details", authenticate, adminAuth,getReturnDetailsController);
 router.patch("/", authenticate, adminAuth, updateReturnStatusController);

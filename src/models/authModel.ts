@@ -1,90 +1,79 @@
 import bcrypt from "bcrypt";
 import jwt from "jsonwebtoken";
-import pool from "../config/database";
 import dotenv from "dotenv";
+import { executeQuery, formatResponse } from "../utils/helper";
 
 dotenv.config();
 
-interface User {
-  first_name: string;
-  last_name: string;
-  email: string;
-  password: string;
-  phone_number: string;
-  role?: "admin" | "customer";
-  dob: string;
-}
-
 const JWT_SECRET = process.env.JWT_SECRET as string;
 
-export const getUserByEmail = async (email: string) => {
-  try {
-    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
-    return rows.length > 0 ? { error: false, message: "", data: rows[0] } : { error: true, message: "User not found", data: {} };
-  } catch (error) {
-    return { error: true, message: "Error fetching user", data: {} };
-  }
-};
-
-export const registerUserService = async (user: User) => {
-  const { first_name, last_name, email, password, phone_number, role, dob } = user;
-
-  try {
-    const existingUser = await getUserByEmail(email);
-
-    if (existingUser.error) {
-      return { error: true, message: "Email already in use", data: {} };
+class UserService {
+    // Get user by email
+    private async getUserByEmail(email: string) {
+        const result = await executeQuery("SELECT * FROM users WHERE email = $1", [email]);
+        return result.error || result.data.length === 0
+            ? formatResponse(true, "User not found")
+            : formatResponse(false, "", result.data[0]);
     }
 
-    // Hash password
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Register a new user
+    public async registerUser(user: {
+        first_name: string;
+        last_name: string;
+        email: string;
+        password: string;
+        phone_number: string;
+        role?: "admin" | "customer";
+        dob: string;
+    }) {
+        const { first_name, last_name, email, password, phone_number, role, dob } = user;
 
-    // Insert user into DB
-    const newUser = await pool.query(
-      `INSERT INTO users (first_name, last_name, email, password, phone_number, role, dob) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) 
-       RETURNING user_id, first_name, last_name, email, phone_number, role, dob`,
-      [first_name, last_name, email, hashedPassword, phone_number, role, dob]
-    );
+        const existingUser = await this.getUserByEmail(email);
+        if (!existingUser.error) {
+            return formatResponse(true, "Email already in use");
+        }
 
-    return { error: false, message: "User registered successfully", data: newUser.rows[0] };
-  } catch (error) {
-    return { error: true, message: "Error registering user", data: {} };
-  }
-};
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const query = `
+            INSERT INTO users (first_name, last_name, email, password, phone_number, role, dob) 
+            VALUES ($1, $2, $3, $4, $5, $6, $7) 
+            RETURNING user_id, first_name, last_name, email, phone_number, role, dob
+        `;
+        const values = [first_name, last_name, email, hashedPassword, phone_number, role, dob];
 
-export const loginUserService = async (email: string, password: string) => {
-  try {
-    const user = await getUserByEmail(email);
-
-    if (user.error) {
-      return { error: true, message: "Invalid email or password", data: {} };
+        const result = await executeQuery(query, values);
+        return result.error
+            ? formatResponse(true, "Error registering user")
+            : formatResponse(false, "User registered successfully", result.data[0]);
     }
 
-    const isMatch = await bcrypt.compare(password, user.data.password);
+    // User login
+    public async loginUser(email: string, password: string) {
+        const user = await this.getUserByEmail(email);
 
-    if (!isMatch) {
-      return { error: true, message: "Invalid email or password", data: {} };
+        if (user.error) return formatResponse(true, "Invalid email or password");
+
+        const isMatch = await bcrypt.compare(password, user.data.password);
+        if (!isMatch) return formatResponse(true, "Invalid email or password");
+
+        const token = jwt.sign({ userId: user.data.user_id, email, role: user.data.role }, JWT_SECRET, {
+            expiresIn: "1h",
+        });
+
+        return formatResponse(false, "Login successful", { token, user: user.data });
     }
 
-    const token = jwt.sign({ userId: user.data.user_id, email, role: user.data.role }, JWT_SECRET, { expiresIn: "1h" });
+    // Get user profile
+    public async getProfile(userId: number) {
+        const result = await executeQuery(
+            "SELECT first_name, last_name, email, phone_number, dob FROM users WHERE user_id = $1",
+            [userId]
+        );
 
-    return { error: false, message: "Login successful", data: { token, user: user.data } };
-  } catch (error) {
-    return { error: true, message: "Error logging in", data: {} };
-  }
-};
-
-export const getProfileService = async (userId: number) => {
-  try {
-    const { rows } = await pool.query("SELECT first_name, last_name, email, phone_number, dob FROM users WHERE user_id = $1", [userId]);
-
-    if (rows.length === 0) {
-      return { error: true, message: "User not found", data: {} };
+        return result.error || result.data.length === 0
+            ? formatResponse(true, "User not found")
+            : formatResponse(false, "Profile fetched successfully", result.data[0]);
     }
+}
 
-    return { error: false, message: "Profile fetched successfully", data: rows[0] };
-  } catch (error) {
-    return { error: true, message: "Error fetching user profile", data: {} };
-  }
-};
+export default UserService;

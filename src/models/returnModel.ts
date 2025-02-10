@@ -1,3 +1,4 @@
+import { executeQuery, formatResponse } from "../utils/helper";
 import pool from "../config/database";
 
 export interface ReturnItem {
@@ -21,157 +22,173 @@ export interface Return {
     created_at?: Date;
 }
 
-export const createReturnRequest = async (returnRequest: Return, returnItems: ReturnItem[]) => {
-    try {
+export class ReturnService {
+    private dbClient = pool;
+
+    async createReturnRequest(returnRequest: Return, returnItems: ReturnItem[]) {
         const { user_id, return_reason, order_id } = returnRequest;
+        const client = await this.dbClient.connect();
 
-        // Check if the order exists and belongs to the user
-        const orderCheck = await pool.query(
-            `SELECT status FROM orders WHERE order_id = $1 AND user_id = $2`,
-            [order_id, user_id]
-        );
+        try {
+            await client.query("BEGIN");
 
-        if (orderCheck.rowCount === 0) {
-            return { error: true, message: "Order not found or does not belong to this user.", data: null };
-        }
-
-        if (orderCheck.rows[0].status !== "Delivered") {
-            return { error: true, message: "Order must be delivered before a return request can be created.", data: null };
-        }
-
-        // Create the return request
-        const result = await pool.query(
-            `INSERT INTO returns (user_id, return_reason, status, order_id, created_at)
-             VALUES ($1, $2, 'Pending', $3, NOW()) RETURNING *`,
-            [user_id, return_reason, order_id]
-        );
-
-        const returnId = result.rows[0].return_id;
-
-        // Validate return items
-        if (returnItems.length === 0) {
-            return { error: true, message: "At least one return item must be provided.", data: null };
-        }
-
-        for (const item of returnItems) {
-            const { product_id, quantity, reason, ordered_item_id } = item;
-
-            if (quantity <= 0 || !reason) {
-                return { error: true, message: "Invalid return item: Quantity must be greater than zero and reason must be provided.", data: null };
-            }
-
-            // Check if the order item exists and validate quantity
-            const orderItemCheck = await pool.query(
-                `SELECT quantity AS ordered_quantity FROM ordereditems WHERE ordered_item_id = $1 AND order_id = $2`,
-                [ordered_item_id, order_id]
+            // Check if order exists and is delivered
+            const orderCheck = await client.query(
+                `SELECT status FROM orders WHERE order_id = $1 AND user_id = $2`,
+                [order_id, user_id]
             );
 
-            if (orderItemCheck.rowCount === 0) {
-                return { error: true, message: `Ordered item ID ${ordered_item_id} not found in this order.`, data: null };
+            if (!orderCheck.rows.length) {
+                return formatResponse(true, "Order not found or does not belong to this user.", null);
             }
 
-            if (quantity > orderItemCheck.rows[0].ordered_quantity) {
-                return { error: true, message: `Returned quantity cannot exceed ordered quantity (${orderItemCheck.rows[0].ordered_quantity}).`, data: null };
+            if (orderCheck.rows[0].status !== "Delivered") {
+                return formatResponse(true, "Order must be delivered before a return request can be created.", null);
             }
 
-            // Insert return item
-            await pool.query(
-                `INSERT INTO returnitems (return_id, product_id, quantity, reason, ordered_item_id, created_at)
-                 VALUES ($1, $2, $3, $4, $5, NOW())`,
-                [returnId, product_id, quantity, reason, ordered_item_id]
+            if (returnItems.length === 0) {
+                return formatResponse(true, "At least one return item must be provided.", null);
+            }
+
+            // Insert return request
+            const returnResult = await client.query(
+                `INSERT INTO returns (user_id, return_reason, status, order_id, created_at)
+                 VALUES ($1, $2, 'Pending', $3, NOW()) RETURNING return_id`,
+                [user_id, return_reason, order_id]
             );
+
+            const returnId = returnResult.rows[0].return_id;
+
+            for (const item of returnItems) {
+                const { product_id, quantity, reason, ordered_item_id } = item;
+
+                if (quantity <= 0 || !reason) {
+                    return formatResponse(true, "Invalid return item: Quantity must be greater than zero and reason must be provided.", null);
+                }
+
+                // Check if the product was actually ordered by the user
+                const orderItemCheck = await client.query(
+                    `SELECT current_quantity FROM ordereditems 
+                     WHERE ordered_item_id = $1 AND order_id = $2 AND product_id = $3`,
+                    [ordered_item_id, order_id, product_id]
+                );
+
+                if (!orderItemCheck.rows.length) {
+                    return formatResponse(true, "Invalid return item: Product was not ordered by this user.", null);
+                }
+
+                if (quantity > orderItemCheck.rows[0].current_quantity) {
+                    return formatResponse(true, `Returned quantity cannot exceed current quantity (${orderItemCheck.rows[0].current_quantity}).`, null);
+                }
+
+                // Insert return item
+                await client.query(
+                    `INSERT INTO returnitems (return_id, product_id, quantity, reason, ordered_item_id, created_at)
+                     VALUES ($1, $2, $3, $4, $5, NOW())`,
+                    [returnId, product_id, quantity, reason, ordered_item_id]
+                );
+            }
+
+            await client.query("COMMIT");
+            return formatResponse(false, "Return request created successfully", { returnId });
+        } catch (error) {
+            await client.query("ROLLBACK");
+            return formatResponse(true, "Failed to create return request", null);
+        } finally {
+            client.release();
+        }
+    }
+
+    async getAllReturns() {
+        return await executeQuery(`SELECT * FROM returns ORDER BY created_at DESC`);
+    }
+
+    async getReturnDetails(return_id: number) {
+        const result = await executeQuery(`SELECT * FROM returnitems WHERE return_id = $1`, [return_id]);
+
+        if (!result.data || result.data.length === 0) {
+            return formatResponse(true, "No return items found for this return ID", null);
         }
 
-        return { error: false, message: "Return request created successfully", data: { returnId } };
-
-    } catch (error) {
-        console.error("Error creating return request:", error);
-        return { error: true, message: "Failed to create return request", data: null };
+        return formatResponse(false, "Return details retrieved successfully", result.data);
     }
-};
 
-// Get all return requests (Admin)
-export const getAllReturns = async () => {
-    try {
-        const result = await pool.query(`SELECT * FROM returns ORDER BY created_at DESC`);
-        return { error: false, message: "All return requests retrieved successfully", data: result.rows };
-    } catch (error) {
-        console.error("Error fetching returns:", error);
-        return { error: true, message: "Failed to fetch return requests", data: null };
-    }
-};
+    async updateReturnStatus(return_id: number, status: string) {
+        // Check if return request exists
+        const returnCheck = await executeQuery(`SELECT * FROM returns WHERE return_id = $1`, [return_id]);
 
-// Get return details by return ID
-export const getReturnDetails = async (return_id: number) => {
-    try {
-        const result = await pool.query(`SELECT * FROM returnitems WHERE return_id = $1`, [return_id]);
-
-        if (result.rowCount === 0) {
-            return { error: true, message: "No return items found for this return ID", data: null };
+        if (!returnCheck.data || returnCheck.data.length === 0) {
+            return formatResponse(true, "Return request not found", null);
         }
 
-        return { error: false, message: "Return details retrieved successfully", data: result.rows };
-    } catch (error) {
-        console.error("Error fetching return details:", error);
-        return { error: true, message: "Failed to fetch return details", data: null };
-    }
-};
-
-// Update return request status (Admin)
-export const updateReturnStatus = async (return_id: number, status: string) => {
-    try {
-        const returnCheck = await pool.query(`SELECT * FROM returns WHERE return_id = $1`, [return_id]);
-
-        if (returnCheck.rowCount === 0) {
-            return { error: true, message: "Return request not found", data: null };
-        }
-
-        await pool.query(`UPDATE returns SET status = $1 WHERE return_id = $2`, [status, return_id]);
-        await pool.query(`UPDATE returnitems SET status = $1 WHERE return_id = $2`, [status, return_id]);
+        // Update status of return request and return items
+        await executeQuery(`UPDATE returns SET status = $1 WHERE return_id = $2`, [status, return_id]);
+        await executeQuery(`UPDATE returnitems SET status = $1 WHERE return_id = $2`, [status, return_id]);
 
         if (status === "Approved") {
-            const returnItems = await pool.query(
-                `SELECT product_id, quantity FROM returnitems WHERE return_id = $1`,
+            // Fetch return items
+            const returnItems = await executeQuery(
+                `SELECT product_id, quantity, ordered_item_id FROM returnitems WHERE return_id = $1`,
                 [return_id]
             );
 
             let totalReturnedQuantity = 0;
 
-            for (const item of returnItems.rows) {
-                const { product_id, quantity } = item;
+            for (const item of returnItems.data) {
+                const { product_id, quantity, ordered_item_id } = item;
                 totalReturnedQuantity += quantity;
 
-                await pool.query(`UPDATE products SET stock = stock + $1 WHERE product_id = $2`, [quantity, product_id]);
+                // Update product stock
+                await executeQuery(`UPDATE products SET stock = stock + $1 WHERE product_id = $2`, [quantity, product_id]);
+
+                // Update current_quantity in ordered_items
+                await executeQuery(`UPDATE ordereditems SET current_quantity = current_quantity - $1 WHERE ordered_item_id = $2`, [quantity, ordered_item_id]);
             }
 
-            await pool.query(`UPDATE returns SET total_returned_quantity = $1 WHERE return_id = $2`, [totalReturnedQuantity, return_id]);
+            // Update total returned quantity in returns table
+            await executeQuery(`UPDATE returns SET total_returned_quantity = $1 WHERE return_id = $2`, [totalReturnedQuantity, return_id]);
         }
 
-        return { error: false, message: "Return status updated successfully", data: { return_id, status } };
-    } catch (error) {
-        console.error("Error updating return status:", error);
-        return { error: true, message: "Failed to update return status", data: null };
+        return formatResponse(false, "Return status updated successfully", { return_id, status });
     }
-};
 
-// Get return items for a specific return request (User)
-export const getReturnItems = async (return_id: number, user_id: number) => {
-    try {
-        const result = await pool.query(
-            `SELECT ri.* 
+    async getReturnItems(return_id: number, user_id: number) {
+        const result = await executeQuery(
+            `SELECT 
+                ri.return_item_id,
+                ri.ordered_item_id,
+                ri.quantity,
+                ri.product_id,
+                p.name AS product_name,
+                ri.reason,
+                r.return_id,
+                r.status
              FROM returnitems ri
              JOIN returns r ON ri.return_id = r.return_id
+             JOIN products p ON ri.product_id = p.product_id
              WHERE ri.return_id = $1 AND r.user_id = $2`,
             [return_id, user_id]
         );
 
-        if (result.rowCount === 0) {
-            return { error: true, message: "No return items found for this return request", data: null };
+        if (!result.data || result.data.length === 0) {
+            return formatResponse(true, "No return items found for this return request", null);
         }
 
-        return { error: false, message: "Return items retrieved successfully", data: result.rows };
-    } catch (error) {
-        console.error("Error fetching return items:", error);
-        return { error: true, message: "Failed to fetch return items", data: null };
+        const { return_id: returnId, status } = result.data[0];
+
+        const items = result.data.map((item: any) => ({
+            return_item_id: item.return_item_id,
+            order_item_id: item.ordered_item_id,
+            quantity: item.quantity,
+            product_id: item.product_id,
+            product_name: item.product_name,
+            reason: item.reason
+        }));
+
+        return formatResponse(false, "Return items retrieved successfully", {
+            return_id: returnId,
+            status,
+            items
+        });
     }
-};
+}

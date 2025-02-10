@@ -17,3 +17,8 @@ pnpm-debug.log*
 .vscode/
 .idea/
 .DS_Store
+src/controllers/temp.txt
+src/models/temp.txt
+src/models/temp2.txt
+src/models/temp3.txt
+src/controllers/temp2.txt

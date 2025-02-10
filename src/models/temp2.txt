@@ -157,3 +157,1232 @@ export const deleteAddress = async (userId: number, addressId: number) => {
         return { error: true, message: "Could not delete address", data: {} };
     }
 };
+
+
+import bcrypt from "bcrypt";
+import jwt from "jsonwebtoken";
+import pool from "../config/database";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+interface User {
+  first_name: string;
+  last_name: string;
+  email: string;
+  password: string;
+  phone_number: string;
+  role?: "admin" | "customer";
+  dob: string;
+}
+
+const JWT_SECRET = process.env.JWT_SECRET as string;
+
+export const getUserByEmail = async (email: string) => {
+  try {
+    const { rows } = await pool.query("SELECT * FROM users WHERE email = $1", [email]);
+    return rows.length > 0 ? { error: false, message: "", data: rows[0] } : { error: true, message: "User not found", data: {} };
+  } catch (error) {
+    return { error: true, message: "Error fetching user", data: {} };
+  }
+};
+
+export const registerUserService = async (user: User) => {
+  const { first_name, last_name, email, password, phone_number, role, dob } = user;
+
+  try {
+    const existingUser = await getUserByEmail(email);
+
+    if (existingUser.error) {
+      return { error: true, message: "Email already in use", data: {} };
+    }
+
+    // Hash password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Insert user into DB
+    const newUser = await pool.query(
+      `INSERT INTO users (first_name, last_name, email, password, phone_number, role, dob) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+       RETURNING user_id, first_name, last_name, email, phone_number, role, dob`,
+      [first_name, last_name, email, hashedPassword, phone_number, role, dob]
+    );
+
+    return { error: false, message: "User registered successfully", data: newUser.rows[0] };
+  } catch (error) {
+    return { error: true, message: "Error registering user", data: {} };
+  }
+};
+
+export const loginUserService = async (email: string, password: string) => {
+  try {
+    const user = await getUserByEmail(email);
+
+    if (user.error) {
+      return { error: true, message: "Invalid email or password", data: {} };
+    }
+
+    const isMatch = await bcrypt.compare(password, user.data.password);
+
+    if (!isMatch) {
+      return { error: true, message: "Invalid email or password", data: {} };
+    }
+
+    const token = jwt.sign({ userId: user.data.user_id, email, role: user.data.role }, JWT_SECRET, { expiresIn: "1h" });
+
+    return { error: false, message: "Login successful", data: { token, user: user.data } };
+  } catch (error) {
+    return { error: true, message: "Error logging in", data: {} };
+  }
+};
+
+export const getProfileService = async (userId: number) => {
+  try {
+    const { rows } = await pool.query("SELECT first_name, last_name, email, phone_number, dob FROM users WHERE user_id = $1", [userId]);
+
+    if (rows.length === 0) {
+      return { error: true, message: "User not found", data: {} };
+    }
+
+    return { error: false, message: "Profile fetched successfully", data: rows[0] };
+  } catch (error) {
+    return { error: true, message: "Error fetching user profile", data: {} };
+  }
+};
+
+
+
+import pool from "../config/database";
+
+interface AddtoCartItems {
+    cart_id: number;
+    user_id: number;
+    product_id: number;
+    quantity: number;
+}
+
+export const getAllCarts = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT cart_id, total_amount FROM carts WHERE user_id = $1`,
+            [userId]
+        );
+        return { error: false, message: "Carts fetched successfully", data: result.rows };
+    } catch (error) {
+        console.log(error);
+        return { error: true, message: "Error fetching carts", data: {} };
+    }
+};
+
+export const createCart = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            `INSERT INTO carts (user_id) VALUES ($1) RETURNING *`,
+            [userId]
+        );
+        return { error: false, message: "Cart created successfully", data: result.rows[0] };
+    } catch (error) {
+        console.log(error);
+        return { error: true, message: "Error creating cart", data: {} };
+    }
+};
+
+export const addProductCart = async (cart: AddtoCartItems) => {
+    try {
+        const { user_id, cart_id, product_id, quantity } = cart;
+
+        const productStock = await pool.query(
+            `SELECT stock, price FROM products WHERE product_id = $1`,
+            [product_id]
+        );
+
+        if (productStock.rowCount === 0) {
+            return { error: true, message: "Product not found.", data: {} };
+        }
+
+        const { stock, price } = productStock.rows[0];
+
+        if (stock < quantity) {
+            return { error: true, message: "Not enough stock available.", data: {} };
+        }
+
+        const cartData = await pool.query(
+            `SELECT total_amount FROM carts WHERE user_id = $1 AND cart_id = $2`,
+            [user_id, cart_id]
+        );
+
+        if (cartData.rowCount === 0) {
+            return { error: true, message: "Cart not found for this user.", data: {} };
+        }
+
+        const { total_amount } = cartData.rows[0];
+        const updatedAmount = Number(total_amount) + Number(price) * quantity;
+
+        await pool.query(
+            `INSERT INTO cartitems (cart_id, product_id, quantity) VALUES ($1, $2, $3)`,
+            [cart_id, product_id, quantity]
+        );
+
+        await pool.query(
+            `UPDATE carts SET total_amount = $1 WHERE cart_id = $2`,
+            [updatedAmount, cart_id]
+        );
+
+        return { error: false, message: "Product added to cart successfully", data: { updatedAmount } };
+    } catch (error: any) {
+        console.log(error);
+        return { error: true, message: error.message || "Internal Server Error", data: {} };
+    }
+};
+
+export const updateCart = async (cart: AddtoCartItems) => {
+    try {
+        const { user_id, cart_id, product_id, quantity } = cart;
+
+        const productStock = await pool.query(
+            `SELECT stock, price FROM products WHERE product_id = $1`,
+            [product_id]
+        );
+
+        if (productStock.rowCount === 0) {
+            return { error: true, message: "Product not found.", data: {} };
+        }
+
+        const { stock, price } = productStock.rows[0];
+
+        if (stock < quantity) {
+            return { error: true, message: "Not enough stock available.", data: {} };
+        }
+
+        await pool.query(
+            `UPDATE cartitems SET quantity = $1 WHERE cart_id = $2 AND product_id = $3`,
+            [quantity, cart_id, product_id]
+        );
+
+        const totalAmountResult = await pool.query(
+            `SELECT COALESCE(SUM(ci.quantity * p.price), 0) AS total_amount
+             FROM cartitems ci
+             JOIN products p ON ci.product_id = p.product_id
+             WHERE ci.cart_id = $1`,
+            [cart_id]
+        );
+
+        const updatedAmount = Number(totalAmountResult.rows[0].total_amount);
+
+        await pool.query(
+            `UPDATE carts SET total_amount = $1 WHERE cart_id = $2`,
+            [updatedAmount, cart_id]
+        );
+
+        return { error: false, message: "Cart updated successfully", data: { updatedAmount } };
+    } catch (error: any) {
+        console.log(error);
+        return { error: true, message: error.message || "Internal Server Error", data: {} };
+    }
+};
+
+export const deleteProductCart = async (cart: AddtoCartItems) => {
+    try {
+        const { user_id, cart_id, product_id } = cart;
+
+        const productData = await pool.query(
+            `SELECT p.price, ci.quantity 
+             FROM cartitems ci 
+             JOIN products p ON p.product_id = ci.product_id  
+             WHERE ci.cart_id = $1 AND ci.product_id = $2`,
+            [cart_id, product_id]
+        );
+
+        if (productData.rowCount === 0) {
+            return { error: true, message: "Product not found in the cart.", data: {} };
+        }
+
+        const { price, quantity } = productData.rows[0];
+
+        await pool.query(
+            `DELETE FROM cartitems WHERE cart_id = $1 AND product_id = $2`,
+            [cart_id, product_id]
+        );
+
+        const totalAmountResult = await pool.query(
+            `SELECT COALESCE(SUM(ci.quantity * p.price), 0) AS total_amount
+             FROM cartitems ci
+             JOIN products p ON ci.product_id = p.product_id
+             WHERE ci.cart_id = $1`,
+            [cart_id]
+        );
+
+        const updatedAmount = Number(totalAmountResult.rows[0].total_amount);
+
+        await pool.query(
+            `UPDATE carts SET total_amount = $1 WHERE cart_id = $2`,
+            [updatedAmount, cart_id]
+        );
+
+        return { error: false, message: "Product removed from cart successfully", data: { updatedAmount } };
+    } catch (error: any) {
+        console.log(error);
+        return { error: true, message: error.message || "Internal Server Error", data: {} };
+    }
+};
+
+export const deleteCart = async (cart: AddtoCartItems) => {
+    try {
+        const { user_id, cart_id } = cart;
+
+        await pool.query(`DELETE FROM cartitems WHERE cart_id = $1`, [cart_id]);
+        await pool.query(`DELETE FROM carts WHERE cart_id = $1 AND user_id = $2`, [cart_id, user_id]);
+
+        return { error: false, message: "Cart cleared successfully", data: {} };
+    } catch (error: any) {
+        console.log(error);
+        return { error: true, message: error.message || "Internal Server Error", data: {} };
+    }
+};
+
+export const getCartItemsById = async (cart_id: number, user_id: number) => {
+    try {
+        const cartExists = await pool.query(
+            `SELECT * FROM carts WHERE cart_id = $1 AND user_id = $2`,
+            [cart_id, user_id]
+        );
+
+        if (cartExists.rowCount === 0) {
+            return { error: true, message: "Cart not found for this user.", data: {} };
+        }
+
+        const cartData = await pool.query(
+            `SELECT * FROM cartitems WHERE cart_id = $1`,
+            [cart_id]
+        );
+
+        if (cartData.rowCount === 0) {
+            return { error: true, message: "No items found in the cart.", data: {} };
+        }
+
+        return { error: false, message: "Cart items fetched successfully", data: cartData.rows };
+    } catch (error: any) {
+        console.log(error);
+        return { error: true, message: error.message || "Internal Server Error", data: {} };
+    }
+};
+
+
+
+import pool from "../config/database";
+
+export const createCategory = async (name: string) => {
+    try {
+        const result = await pool.query(
+            "INSERT INTO productcategories (name) VALUES ($1) RETURNING *",
+            [name]
+        );
+        return { error:false, message: "Category created successfully", data: result.rows[0] };
+    } catch (error: any) {
+        console.error("Error creating category:", error);
+        return { error: true, message: error.message || "Could not create category", data: {} };
+    }
+};
+
+export const getAllCategories = async () => {
+    try {
+        const result = await pool.query("SELECT * FROM productcategories ORDER BY name ASC");
+        return { error:false, message: "Categories fetched successfully", data: result.rows };
+    } catch (error: any) {
+        console.error("Error fetching categories:", error);
+        return { error: true, message: error.message || "Could not fetch categories", data: {} };
+    }
+};
+
+export const getCategoryById = async (category_id: number) => {
+    try {
+        const result = await pool.query("SELECT * FROM productcategories WHERE category_id = $1", [category_id]);
+        if (result.rowCount === 0) {
+            return { error: true, message: "Category not found", data: {} };
+        }
+        return {error:false, message: "Category fetched successfully", data: result.rows[0] };
+    } catch (error: any) {
+        console.error("Error fetching category:", error);
+        return { error: true, message: error.message || "Could not fetch category", data: {} };
+    }
+};
+
+export const updateCategory = async (category_id: number, name: string) => {
+    try {
+        const result = await pool.query(
+            "UPDATE productcategories SET name = $2 WHERE category_id = $1 RETURNING *",
+            [category_id, name]
+        );
+        if (result.rowCount === 0) {
+            return { error: true, message: "Category not found or not updated", data: {} };
+        }
+        return { error:false, message: "Category updated successfully", data: result.rows[0] };
+    } catch (error: any) {
+        console.error("Error updating category:", error);
+        return { error: true, message: error.message || "Could not update category", data: {} };
+    }
+};
+
+export const deleteCategory = async (category_id: number) => {
+    try {
+        const result = await pool.query(
+            "DELETE FROM productcategories WHERE category_id = $1 RETURNING *",
+            [category_id]
+        );
+        if (result.rowCount === 0) {
+            return { error: true, message: "Category not found or already deleted", data: {} };
+        }
+        return { error:false, message: "Category deleted successfully", data: result.rows[0] };
+    } catch (error: any) {
+        console.error("Error deleting category:", error);
+        return { error: true, message: error.message || "Could not delete category", data: {} };
+    }
+};
+
+
+import pool from "../config/database";
+
+interface Discount {
+    discount_id?: number;
+    code: string;
+    discount_percentage: number;
+    expiration_date: string;
+    created_at?: string;
+}
+
+// Create a Discount
+export const createDiscount = async (discount: Discount) => {
+    try {
+        const { code, discount_percentage, expiration_date } = discount;
+        const result = await pool.query(
+            `INSERT INTO discounts (code, discount_percentage, expiration_date, created_at)
+             VALUES ($1, $2, $3, NOW()) RETURNING *`,
+            [code, discount_percentage, expiration_date]
+        );
+        return { error: false, message: "Discount created successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error creating discount:", error);
+        return { error: true, message: "Error creating discount", data: null };
+    }
+};
+
+// Get All Discounts
+export const getAllDiscounts = async () => {
+    try {
+        const result = await pool.query(`SELECT * FROM discounts`);
+        return { error: false, message: "Discounts fetched successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching discounts:", error);
+        return { error: true, message: "Error fetching discounts", data: null };
+    }
+};
+
+// Get Discount by ID
+export const getDiscountById = async (discount_id: number) => {
+    try {
+        const result = await pool.query(`SELECT * FROM discounts WHERE discount_id = $1`, [discount_id]);
+        if (result.rowCount === 0) {
+            return { error: true, message: "Discount not found", data: null };
+        }
+        return { error: false, message: "Discount fetched successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error fetching discount:", error);
+        return { error: true, message: "Error fetching discount", data: null };
+    }
+};
+
+// Update Discount
+export const updateDiscount = async (discount:Discount) => {
+    try {
+        const { code, discount_percentage, expiration_date,discount_id } = discount;
+        const result = await pool.query(
+            `UPDATE discounts 
+             SET code = COALESCE($1, code), 
+                 discount_percentage = COALESCE($2, discount_percentage),
+                 expiration_date = COALESCE($3, expiration_date)
+             WHERE discount_id = $4 RETURNING *`,
+            [code, discount_percentage, expiration_date, discount_id]
+        );
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "Discount not found", data: null };
+        }
+        return { error: false, message: "Discount updated successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error updating discount:", error);
+        return { error: true, message: "Error updating discount", data: null };
+    }
+};
+
+// Delete Discount
+export const deleteDiscount = async (discount_id: number) => {
+    try {
+        const result = await pool.query(`DELETE FROM discounts WHERE discount_id = $1 RETURNING *`, [discount_id]);
+        if (result.rowCount === 0) {
+            return { error: true, message: "Discount not found", data: null };
+        }
+        return { error: false, message: "Discount deleted successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error deleting discount:", error);
+        return { error: true, message: "Error deleting discount", data: null };
+    }
+};
+
+
+
+import pool from "../config/database";
+
+export interface Feedback {
+    feedback_id?: number;
+    user_id: number;
+    product_id: number;
+    rating: number;
+    comment: string;
+    created_at?: Date;
+}
+
+// Helper function to update average rating in products table
+const updateProductRating = async (product_id: number) => {
+    try {
+        const ratingResult = await pool.query(
+            `SELECT COALESCE(AVG(rating), 0) AS avg_rating FROM feedbacks WHERE product_id = $1`,
+            [product_id]
+        );
+
+        const avg_rating = Number(ratingResult.rows[0].avg_rating).toFixed(2);
+
+        await pool.query(
+            `UPDATE products SET average_rating = $1 WHERE product_id = $2`,
+            [avg_rating, product_id]
+        );
+    } catch (error) {
+        console.error("Error updating product rating:", error);
+    }
+};
+
+// Add Feedback
+export const addFeedback = async (feedback: Feedback) => {
+    try {
+        const { user_id, product_id, rating, comment } = feedback;
+
+        // Check if user has ordered the product
+        const orderCheck = await pool.query(
+            `SELECT oi.order_id 
+             FROM ordereditems oi
+             JOIN orders o ON oi.order_id = o.order_id
+             WHERE oi.product_id = $1 AND o.user_id = $2 AND o.status = $3`,
+            [product_id, user_id, "Delivered"]
+        );
+
+        if (orderCheck.rowCount === 0) {
+            return { error: true, message: "You can only leave feedback for products you have purchased.", data: null };
+        }
+
+        // Insert Feedback
+        const result = await pool.query(
+            `INSERT INTO feedbacks (user_id, product_id, rating, comment, created_at)
+             VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
+            [user_id, product_id, rating, comment]
+        );
+
+        await updateProductRating(product_id);
+
+        return { error: false, message: "Feedback added successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error adding feedback:", error);
+        return { error: true, message: "Error adding feedback", data: null };
+    }
+};
+
+// Get All Feedbacks
+export const getAllFeedbacks = async () => {
+    try {
+        const result = await pool.query(`SELECT * FROM feedbacks ORDER BY created_at DESC`);
+        return { error: false, message: "Feedbacks retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching feedbacks:", error);
+        return { error: true, message: "Error fetching feedbacks", data: null };
+    }
+};
+
+// Get Feedback for Specific Product
+export const getProductFeedback = async (product_id: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT * FROM feedbacks WHERE product_id = $1 ORDER BY created_at DESC`,
+            [product_id]
+        );
+        return { error: false, message: "Product feedback retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching product feedback:", error);
+        return { error: true, message: "Error fetching product feedback", data: null };
+    }
+};
+
+// Update Feedback (Only Author)
+export const updateFeedback = async (feedback_id: number, user_id: number, rating: number, comment: string) => {
+    try {
+        // Check if user owns the feedback
+        const feedbackCheck = await pool.query(
+            `SELECT * FROM feedbacks WHERE feedback_id = $1 AND user_id = $2`,
+            [feedback_id, user_id]
+        );
+
+        if (feedbackCheck.rowCount === 0) {
+            return { error: true, message: "Unauthorized: You can only update your own feedback", data: null };
+        }
+
+        // Update feedback
+        const result = await pool.query(
+            `UPDATE feedbacks 
+             SET rating = COALESCE($1, rating), comment = COALESCE($2, comment) 
+             WHERE feedback_id = $3 RETURNING *`,
+            [rating, comment, feedback_id]
+        );
+
+        await updateProductRating(feedbackCheck.rows[0].product_id);
+
+        return { error: false, message: "Feedback updated successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error updating feedback:", error);
+        return { error: true, message: "Error updating feedback", data: null };
+    }
+};
+
+// Delete Feedback (Only Author)
+export const deleteFeedback = async (feedback_id: number, user_id: number) => {
+    try {
+        // Check if user owns the feedback
+        const feedbackCheck = await pool.query(
+            `SELECT * FROM feedbacks WHERE feedback_id = $1 AND user_id = $2`,
+            [feedback_id, user_id]
+        );
+
+        if (feedbackCheck.rowCount === 0) {
+            return { error: true, message: "Unauthorized: You can only delete your own feedback", data: null };
+        }
+
+        const product_id = feedbackCheck.rows[0].product_id;
+
+        // Delete feedback
+        await pool.query(`DELETE FROM feedbacks WHERE feedback_id = $1`, [feedback_id]);
+
+        await updateProductRating(product_id);
+
+        return { error: false, message: "Feedback deleted successfully", data: null };
+    } catch (error) {
+        console.error("Error deleting feedback:", error);
+        return { error: true, message: "Error deleting feedback", data: null };
+    }
+};
+
+
+import pool from "../config/database";
+
+interface Order {
+    order_id: number;
+    user_id: number;
+    address_id: number;
+    cart_id: number;
+    discount_id: number | null;
+    total_amount: number;
+    status: string;
+    payment_status: string;
+    payment_method: string;
+    transaction_id: string | null;
+    created_at: Date;
+    discount_amount: number;
+    net_amount: number;
+}
+
+// Get All Orders for a User
+export const getAllUserOrders = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT order_id, net_amount FROM orders WHERE user_id = $1`,
+            [userId]
+        );
+        return { error: false, message: "User orders retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error(error);
+        return { error: true, message: "Error fetching user orders", data: null };
+    }
+};
+
+// Get Order Details by Order ID
+export const getOrdersById = async (userId: number, order_id: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT p.name, oi.order_id, oi.price, oi.quantity, o.total_amount, o.discount_amount, o.net_amount, o.status
+             FROM ordereditems oi
+             JOIN products p ON oi.product_id = p.product_id
+             JOIN orders o ON o.order_id = oi.order_id
+             WHERE o.user_id = $1 AND o.order_id = $2`,
+            [userId, order_id]
+        );
+        if (result.rowCount === 0) {
+            return { error: true, message: "Order not found", data: null };
+        }
+        return { error: false, message: "Order details retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error(error);
+        return { error: true, message: "Error fetching order details", data: null };
+    }
+};
+
+// Get All Orders (Admin)
+export const getAllOrders = async () => {
+    try {
+        const result = await pool.query(`SELECT * FROM orders`);
+        return { error: false, message: "All orders retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error(error);
+        return { error: true, message: "Error fetching orders", data: null };
+    }
+};
+
+// Update Order Status (Admin)
+export const updateOrderStatus = async (order: Order) => {
+    try {
+        const { order_id, status } = order;
+        const result = await pool.query(
+            `UPDATE orders SET status = $1 WHERE order_id = $2 RETURNING *`,
+            [status, order_id]
+        );
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "Order not found or no changes made", data: null };
+        }
+        return { error: false, message: "Order status updated successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error(error);
+        return { error: true, message: "Error updating order", data: null };
+    }
+};
+
+// Cancel Order (User)
+// export const cancelOrder = async (userId: number, order_id: number) => {
+//     try {
+//         const result = await pool.query(
+//             `UPDATE orders SET status = $1 WHERE order_id = $2 AND user_id = $3 RETURNING *`,
+//             ["cancelled", order_id, userId]
+//         );
+
+//         if (result.rowCount === 0) {
+//             return { error: true, message: "Order not found or already cancelled", data: null };
+//         }
+//         return { error: false, message: "Order cancelled successfully", data: result.rows[0] };
+//     } catch (error) {
+//         console.error(error);
+//         return { error: true, message: "Error cancelling order", data: null };
+//     }
+// };
+
+export const cancelOrder = async (userId: number, order_id: number) => {
+    const client = await pool.connect();
+    try {
+        await client.query("BEGIN"); // Start transaction
+
+        // Step 1: Check if the order exists and is not already cancelled
+        const orderCheck = await client.query(
+            `SELECT status FROM orders WHERE order_id = $1 AND user_id = $2`,
+            [order_id, userId]
+        );
+
+        if (orderCheck.rowCount === 0) {
+            await client.query("ROLLBACK");
+            return { error: true, message: "Order not found or does not belong to the user", data: null };
+        }
+
+        const orderStatus = orderCheck.rows[0].status;
+        if (orderStatus === "Cancelled") {
+            await client.query("ROLLBACK");
+            return { error: true, message: "Order is already cancelled", data: null };
+        }
+
+        // Step 2: Restore stock of products in the order
+        const orderItems = await client.query(
+            `SELECT product_id, quantity FROM ordereditems WHERE order_id = $1`,
+            [order_id]
+        );
+
+        for (const item of orderItems.rows) {
+            const { product_id, quantity } = item;
+            await client.query(
+                `UPDATE products SET stock = stock + $1 WHERE product_id = $2`,
+                [quantity, product_id]
+            );
+        }
+
+        // Step 3: Cancel the order
+        const result = await client.query(
+            `UPDATE orders SET status = $1 WHERE order_id = $2 AND user_id = $3 RETURNING *`,
+            ["Cancelled", order_id, userId]
+        );
+
+        await client.query("COMMIT"); // Commit transaction
+
+        return { error: false, message: "Order cancelled successfully", data: result.rows[0] };
+    } catch (error) {
+        await client.query("ROLLBACK"); // Rollback transaction in case of an error
+        console.error("Error cancelling order:", error);
+        return { error: true, message: "Error cancelling order", data: null };
+    } finally {
+        client.release();
+    }
+};
+
+// Create Order
+export const createUserOrder = async (order: Order) => {
+    try {
+        await pool.query("BEGIN"); // Start Transaction
+
+        const { user_id, cart_id, address_id, discount_id, payment_method, payment_status, transaction_id } = order;
+
+        // Step 1: Verify Cart Belongs to User
+        const cartData = await pool.query(
+            `SELECT total_amount FROM carts WHERE cart_id = $1 AND user_id = $2 FOR UPDATE`,
+            [cart_id, user_id]
+        );
+        if (cartData.rowCount === 0) {
+            return { error: true, message: "Cart not found or does not belong to this user", data: null };
+        }
+        const total_amount = Number(cartData.rows[0].total_amount);
+
+        // Step 2: Calculate Discount Amount
+        let discount_amount = 0;
+        if (discount_id) {
+            const discountData = await pool.query(
+                `SELECT discount_percentage FROM discounts WHERE discount_id = $1 AND expiration_date >= NOW()`,
+                [discount_id]
+            );
+            if (discountData.rows.length > 0) {
+                const discount_percentage = Number(discountData.rows[0].discount_percentage);
+                discount_amount = (discount_percentage / 100) * total_amount;
+            } else {
+                return { error: true, message: "Invalid or expired discount", data: null };
+            }
+        }
+
+        // Step 3: Calculate Net Amount
+        const net_amount = total_amount - discount_amount;
+
+        // Step 4: Create Order
+        const orderResult = await pool.query(
+            `INSERT INTO orders (user_id, address_id, discount_id, total_amount, status, payment_status, payment_method, transaction_id, created_at, discount_amount, net_amount)
+             VALUES ($1, $2, $3, $4, 'Pending', $9, $5, $6, NOW(), $7, $8) RETURNING *`,
+            [user_id, address_id, discount_id, total_amount, payment_method, transaction_id, discount_amount, net_amount, payment_status]
+        );
+        const orderId = orderResult.rows[0].order_id;
+
+        // Step 5: Get Cart Items
+        const cartItemsResult = await pool.query(
+            `SELECT ci.product_id, ci.quantity, p.price FROM cartitems ci JOIN products p ON ci.product_id = p.product_id WHERE ci.cart_id = $1`,
+            [cart_id]
+        );
+        if (cartItemsResult.rowCount === 0) {
+            return { error: true, message: "No items found in the cart", data: null };
+        }
+
+        // Step 6: Process Cart Items, Update Stock, and Add to Ordered Items
+        for (let item of cartItemsResult.rows) {
+            const { product_id, quantity, price } = item;
+
+            // Check stock before processing
+            const productData = await pool.query(
+                `SELECT stock FROM products WHERE product_id = $1 FOR UPDATE`,
+                [product_id]
+            );
+            const stock = productData.rows[0].stock;
+            if (stock < quantity) {
+                return { error: true, message: `Not enough stock for product ${product_id}`, data: null };
+            }
+
+            // Update stock in the products table
+            await pool.query(
+                `UPDATE products SET stock = stock - $1 WHERE product_id = $2`,
+                [quantity, product_id]
+            );
+
+            // Insert into ordered items
+            await pool.query(
+                `INSERT INTO ordereditems (order_id, product_id, quantity, price) VALUES ($1, $2, $3, $4)`,
+                [orderId, product_id, quantity, price]
+            );
+        }
+
+        // Step 7: Clear the Cart
+        await pool.query(`DELETE FROM cartitems WHERE cart_id = $1`, [cart_id]);
+        await pool.query(`UPDATE carts SET total_amount = 0 WHERE cart_id = $1`, [cart_id]);
+
+        await pool.query("COMMIT"); // Commit Transaction
+
+        return { error: false, message: "Order created successfully", data: orderResult.rows[0] };
+    } catch (error) {
+        await pool.query("ROLLBACK"); // Rollback Transaction if Error Occurs
+        console.error("Error creating order:", error);
+        return { error: true, message: "Error creating order", data: null };
+    }
+};
+
+
+import pool from "../config/database";
+
+export const addProduct = async (
+    category_id: number,
+    name: string,
+    description: string,
+    price: number,
+    stock: number
+) => {
+    try {
+        const result = await pool.query(
+            `INSERT INTO products (category_id, name, description, price, stock, created_at, updated_at)
+             VALUES ($1, $2, $3, $4, $5, NOW(), NOW()) 
+             RETURNING *`,
+            [category_id, name, description, price, stock]
+        );
+
+        return { error: false, message: "Product added successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error adding product:", error);
+        return { error: true, message: "Error adding product", data: null };
+    }
+};
+
+export const getAllProducts = async () => {
+    try {
+        const result = await pool.query(`SELECT * FROM products ORDER BY created_at DESC`);
+        return { error: false, message: "Products retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching products:", error);
+        return { error: true, message: "Error fetching products", data: null };
+    }
+};
+
+export const getProductById = async (product_id: number) => {
+    try {
+        const result = await pool.query(`SELECT * FROM products WHERE product_id = $1`, [product_id]);
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "Product not found", data: null };
+        }
+
+        return { error: false, message: "Product retrieved successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error fetching product:", error);
+        return { error: true, message: "Error fetching product", data: null };
+    }
+};
+
+export const updateProduct = async (
+    product_id: number,
+    category_id?: number,
+    name?: string,
+    description?: string,
+    price?: number,
+    stock?: number
+) => {
+    try {
+        const result = await pool.query(
+            `UPDATE products 
+             SET category_id = COALESCE($2, category_id),
+                 name = COALESCE($3, name),
+                 description = COALESCE($4, description),
+                 price = COALESCE($5, price),
+                 stock = COALESCE($6, stock),
+                 updated_at = NOW()
+             WHERE product_id = $1
+             RETURNING *`,
+            [product_id, category_id, name, description, price, stock]
+        );
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "Product not found or no changes made", data: null };
+        }
+
+        return { error: false, message: "Product updated successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error updating product:", error);
+        return { error: true, message: "Error updating product", data: null };
+    }
+};
+
+export const deleteProduct = async (product_id: number) => {
+    try {
+        const result = await pool.query(`DELETE FROM products WHERE product_id = $1 RETURNING *`, [product_id]);
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "Product not found", data: null };
+        }
+
+        return { error: false, message: "Product deleted successfully", data: result.rows[0] };
+    } catch (error) {
+        console.error("Error deleting product:", error);
+        return { error: true, message: "Error deleting product", data: null };
+    }
+};
+
+
+import pool from "../config/database";
+
+export interface ReturnItem {
+    return_item_id?: number;
+    return_id: number;
+    product_id: number;
+    quantity: number;
+    ordered_item_id: number;
+    reason: string;
+    status: string;
+    created_at?: Date;
+}
+
+export interface Return {
+    return_id?: number;
+    user_id: number;
+    total_returned_quantity: number;
+    return_reason: string;
+    status: string;
+    order_id: number;
+    created_at?: Date;
+}
+
+export const createReturnRequest = async (returnRequest: Return, returnItems: ReturnItem[]) => {
+    try {
+        const { user_id, return_reason, order_id } = returnRequest;
+
+       
+        const orderCheck = await pool.query(
+            `SELECT status FROM orders WHERE order_id = $1 AND user_id = $2`,
+            [order_id, user_id]
+        );
+
+        if (orderCheck.rowCount === 0) {
+            return { error: true, message: "Order not found or does not belong to this user.", data: null };
+        }
+
+        if (orderCheck.rows[0].status !== "Delivered") {
+            return { error: true, message: "Order must be delivered before a return request can be created.", data: null };
+        }
+
+        const result = await pool.query(
+            `INSERT INTO returns (user_id, return_reason, status, order_id, created_at)
+             VALUES ($1, $2, 'Pending', $3, NOW()) RETURNING *`,
+            [user_id, return_reason, order_id]
+        );
+
+        const returnId = result.rows[0].return_id;
+
+      
+        if (returnItems.length === 0) {
+            return { error: true, message: "At least one return item must be provided.", data: null };
+        }
+
+        for (const item of returnItems) {
+            const { product_id, quantity, reason, ordered_item_id } = item;
+
+            if (quantity <= 0 || !reason) {
+                return { error: true, message: "Invalid return item: Quantity must be greater than zero and reason must be provided.", data: null };
+            }
+
+            
+            const orderItemCheck = await pool.query(
+                `SELECT quantity AS ordered_quantity FROM ordereditems WHERE ordered_item_id = $1 AND order_id = $2`,
+                [ordered_item_id, order_id]
+            );
+
+            if (orderItemCheck.rowCount === 0) {
+                return { error: true, message: `Ordered item ID ${ordered_item_id} not found in this order.`, data: null };
+            }
+
+            if (quantity > orderItemCheck.rows[0].ordered_quantity) {
+                return { error: true, message: `Returned quantity cannot exceed ordered quantity (${orderItemCheck.rows[0].ordered_quantity}).`, data: null };
+            }
+
+            // Insert return item
+            await pool.query(
+                `INSERT INTO returnitems (return_id, product_id, quantity, reason, ordered_item_id, created_at)
+                 VALUES ($1, $2, $3, $4, $5, NOW())`,
+                [returnId, product_id, quantity, reason, ordered_item_id]
+            );
+        }
+
+        return { error: false, message: "Return request created successfully", data: { returnId } };
+
+    } catch (error) {
+        console.error("Error creating return request:", error);
+        return { error: true, message: "Failed to create return request", data: null };
+    }
+};
+
+// Get all return requests (Admin)
+export const getAllReturns = async () => {
+    try {
+        const result = await pool.query(`SELECT * FROM returns ORDER BY created_at DESC`);
+        return { error: false, message: "All return requests retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching returns:", error);
+        return { error: true, message: "Failed to fetch return requests", data: null };
+    }
+};
+
+// Get return details by return ID
+export const getReturnDetails = async (return_id: number) => {
+    try {
+        const result = await pool.query(`SELECT * FROM returnitems WHERE return_id = $1`, [return_id]);
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "No return items found for this return ID", data: null };
+        }
+
+        return { error: false, message: "Return details retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching return details:", error);
+        return { error: true, message: "Failed to fetch return details", data: null };
+    }
+};
+
+// Update return request status (Admin)
+export const updateReturnStatus = async (return_id: number, status: string) => {
+    try {
+        const returnCheck = await pool.query(`SELECT * FROM returns WHERE return_id = $1`, [return_id]);
+
+        if (returnCheck.rowCount === 0) {
+            return { error: true, message: "Return request not found", data: null };
+        }
+
+        await pool.query(`UPDATE returns SET status = $1 WHERE return_id = $2`, [status, return_id]);
+        await pool.query(`UPDATE returnitems SET status = $1 WHERE return_id = $2`, [status, return_id]);
+
+        if (status === "Approved") {
+            const returnItems = await pool.query(
+                `SELECT product_id, quantity FROM returnitems WHERE return_id = $1`,
+                [return_id]
+            );
+
+            let totalReturnedQuantity = 0;
+
+            for (const item of returnItems.rows) {
+                const { product_id, quantity } = item;
+                totalReturnedQuantity += quantity;
+
+                await pool.query(`UPDATE products SET stock = stock + $1 WHERE product_id = $2`, [quantity, product_id]);
+            }
+
+            await pool.query(`UPDATE returns SET total_returned_quantity = $1 WHERE return_id = $2`, [totalReturnedQuantity, return_id]);
+        }
+
+        return { error: false, message: "Return status updated successfully", data: { return_id, status } };
+    } catch (error) {
+        console.error("Error updating return status:", error);
+        return { error: true, message: "Failed to update return status", data: null };
+    }
+};
+
+// Get return items for a specific return request (User)
+export const getReturnItems = async (return_id: number, user_id: number) => {
+    try {
+        const result = await pool.query(
+            `SELECT ri.* 
+             FROM returnitems ri
+             JOIN returns r ON ri.return_id = r.return_id
+             WHERE ri.return_id = $1 AND r.user_id = $2`,
+            [return_id, user_id]
+        );
+
+        if (result.rowCount === 0) {
+            return { error: true, message: "No return items found for this return request", data: null };
+        }
+
+        return { error: false, message: "Return items retrieved successfully", data: result.rows };
+    } catch (error) {
+        console.error("Error fetching return items:", error);
+        return { error: true, message: "Failed to fetch return items", data: null };
+    }
+};
+
+
+import pool from "../config/database";
+
+export const getAllUsersService = async () => {
+    try {
+        const result = await pool.query("SELECT first_name, last_name, email, role FROM users");
+        
+        return {
+            error: false,
+            message: "Users retrieved successfully",
+            data: result.rows,
+        };
+    } catch (error) {
+        console.error("Error fetching users:", error);
+        return {
+            error: true,
+            message: "Could not retrieve users",
+            data: null,
+        };
+    }
+};
+
+export const getUserByIdService = async (userId: number) => {
+    try {
+        const result = await pool.query(
+            "SELECT first_name, last_name, dob FROM users WHERE user_id = $1",
+            [userId]
+        );
+
+        if (result.rows.length === 0) {
+            return {
+                error: true,
+                message: "User not found",
+                data: null,
+            };
+        }
+
+        return {
+            error: false,
+            message: "User retrieved successfully",
+            data: result.rows[0],
+        };
+    } catch (error) {
+        console.error("Error fetching user by ID:", error);
+        return {
+            error: true,
+            message: "Could not retrieve user",
+            data: null,
+        };
+    }
+};
+
+export const updateUserService = async (userId: number, firstName?: string, lastName?: string) => {
+    try {
+        const result = await pool.query(
+            `UPDATE users 
+             SET first_name = COALESCE($2, first_name), 
+                 last_name = COALESCE($3, last_name) 
+             WHERE user_id = $1 
+             RETURNING first_name, last_name, email, role`,
+            [userId, firstName, lastName]
+        );
+
+        if (result.rows.length === 0) {
+            return {
+                error: true,
+                message: "User not found or no changes applied",
+                data: null,
+            };
+        }
+
+        return {
+            error: false,
+            message: "User updated successfully",
+            data: result.rows[0],
+        };
+    } catch (error) {
+        console.error("Error updating user:", error);
+        return {
+            error: true,
+            message: "Could not update user",
+            data: null,
+        };
+    }
+};

@@ -1,4 +1,4 @@
-import pool from "../config/database";
+import { executeQuery, formatResponse } from "../utils/helper";
 
 interface Discount {
     discount_id?: number;
@@ -8,80 +8,114 @@ interface Discount {
     created_at?: string;
 }
 
-// Create a Discount
-export const createDiscount = async (discount: Discount) => {
-    try {
-        const { code, discount_percentage, expiration_date } = discount;
-        const result = await pool.query(
-            `INSERT INTO discounts (code, discount_percentage, expiration_date, created_at)
-             VALUES ($1, $2, $3, NOW()) RETURNING *`,
-            [code, discount_percentage, expiration_date]
-        );
-        return { error: false, message: "Discount created successfully", data: result.rows[0] };
-    } catch (error) {
-        console.error("Error creating discount:", error);
-        return { error: true, message: "Error creating discount", data: null };
-    }
-};
+export class DiscountService {
 
-// Get All Discounts
-export const getAllDiscounts = async () => {
-    try {
-        const result = await pool.query(`SELECT * FROM discounts`);
-        return { error: false, message: "Discounts fetched successfully", data: result.rows };
-    } catch (error) {
-        console.error("Error fetching discounts:", error);
-        return { error: true, message: "Error fetching discounts", data: null };
-    }
-};
 
-// Get Discount by ID
-export const getDiscountById = async (discount_id: number) => {
-    try {
-        const result = await pool.query(`SELECT * FROM discounts WHERE discount_id = $1`, [discount_id]);
-        if (result.rowCount === 0) {
-            return { error: true, message: "Discount not found", data: null };
+    async createDiscount(discount: Discount) {
+        try {
+            const { code, discount_percentage, expiration_date } = discount;
+            const result = await executeQuery(
+                `INSERT INTO discounts (code, discount_percentage, expiration_date, created_at)
+                 VALUES ($1, $2, $3, NOW()) RETURNING *`,
+                [code, discount_percentage, expiration_date]
+            );
+            return formatResponse(false, "Discount created successfully", result.data.rows[0]);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
         }
-        return { error: false, message: "Discount fetched successfully", data: result.rows[0] };
-    } catch (error) {
-        console.error("Error fetching discount:", error);
-        return { error: true, message: "Error fetching discount", data: null };
     }
-};
 
-// Update Discount
-export const updateDiscount = async (discount:Discount) => {
-    try {
-        const { code, discount_percentage, expiration_date,discount_id } = discount;
-        const result = await pool.query(
-            `UPDATE discounts 
-             SET code = COALESCE($1, code), 
-                 discount_percentage = COALESCE($2, discount_percentage),
-                 expiration_date = COALESCE($3, expiration_date)
-             WHERE discount_id = $4 RETURNING *`,
-            [code, discount_percentage, expiration_date, discount_id]
-        );
-
-        if (result.rowCount === 0) {
-            return { error: true, message: "Discount not found", data: null };
+    async getAllDiscounts() {
+        try {
+            const result = await executeQuery(`SELECT * FROM discounts ORDER BY created_at DESC`);
+            return formatResponse(false, "Discounts fetched successfully", result.data.rows);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
         }
-        return { error: false, message: "Discount updated successfully", data: result.rows[0] };
-    } catch (error) {
-        console.error("Error updating discount:", error);
-        return { error: true, message: "Error updating discount", data: null };
     }
-};
 
-// Delete Discount
-export const deleteDiscount = async (discount_id: number) => {
-    try {
-        const result = await pool.query(`DELETE FROM discounts WHERE discount_id = $1 RETURNING *`, [discount_id]);
-        if (result.rowCount === 0) {
-            return { error: true, message: "Discount not found", data: null };
+    async getDiscountById(discount_id: number) {
+        try {
+            const result = await executeQuery(`SELECT * FROM discounts WHERE discount_id = $1`, [discount_id]);
+            if (result.data.rowCount === 0) {
+                return formatResponse(true, "Discount not found");
+            }
+            return formatResponse(false, "Discount fetched successfully", result.data.rows[0]);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
         }
-        return { error: false, message: "Discount deleted successfully", data: result.rows[0] };
-    } catch (error) {
-        console.error("Error deleting discount:", error);
-        return { error: true, message: "Error deleting discount", data: null };
     }
-};
+
+    // async updateDiscount(discount: Discount) {
+    //     try {
+    //         const { code, discount_percentage, expiration_date, discount_id } = discount;
+
+    //         if (!discount_id) {
+    //             return formatResponse(true, "Discount ID is required for update");
+    //         }
+
+    //         const result = await executeQuery(
+    //             `UPDATE discounts 
+    //              SET code = COALESCE($1, code), 
+    //                  discount_percentage = COALESCE($2, discount_percentage),
+    //                  expiration_date = COALESCE($3, expiration_date)
+    //              WHERE discount_id = $4 RETURNING *`,
+    //             [code, discount_percentage, expiration_date, discount_id]
+    //         );
+
+    //         if (result.data.rowCount === 0) {
+    //             return formatResponse(true, "Discount not found or not updated");
+    //         }
+    //         return formatResponse(false, "Discount updated successfully", result.data.rows[0]);
+    //     } catch (error: any) {
+    //         return formatResponse(true, error.message);
+    //     }
+    // }
+
+    async updateDiscount(discount: Partial<Discount>) {
+        try {
+            if (!discount.discount_id) {
+                return formatResponse(true, "Discount ID is required for update");
+            }
+    
+            const updates = Object.entries(discount).filter(([key]) => key !== "discount_id");
+    
+            if (updates.length === 0) {
+                return formatResponse(true, "No updates provided");
+            }
+    
+            const setClause = updates.map(([key], index) => `${key} = $${index + 1}`).join(", ");
+            const values = updates.map(([, value]) => value);
+            values.push(discount.discount_id); // Add discount_id at the end
+    
+            const query = `
+                UPDATE discounts
+                SET ${setClause}
+                WHERE discount_id = $${values.length}
+                RETURNING *;
+            `;
+    
+            const result = await executeQuery(query, values);
+    
+            if (!result.data || result.data.length === 0) {
+                return formatResponse(true, "Discount not found or not updated");
+            }
+    
+            return formatResponse(false, "Discount updated successfully", result.data[0]);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
+        }
+    }
+
+    async deleteDiscount(discount_id: number) {
+        try {
+            const result = await executeQuery(`DELETE FROM discounts WHERE discount_id = $1 RETURNING *`, [discount_id]);
+            if (result.data.rowCount === 0) {
+                return formatResponse(true, "Discount not found or already deleted");
+            }
+            return formatResponse(false, "Discount deleted successfully", result.data.rows[0]);
+        } catch (error: any) {
+            return formatResponse(true, error.message);
+        }
+    }
+}

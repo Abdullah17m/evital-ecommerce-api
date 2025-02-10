@@ -5,16 +5,18 @@ import {
     getAllProductsController,
     getProductByIdController,
     updateProductController,
-    deleteProductController
+    deleteProductController,
+    searchAndFilterProducts
 } from "../controllers/productController";
 import { validateRequest } from "../middlewares/validateRequest";
-import { productSchema, updateProductSchema } from "../middlewares/productValidation";
+import searchAndFilterSchema, { productSchema, updateProductSchema } from "../middlewares/productValidation";
 
 const router = express.Router();
 
 // Routes
 router.post("/", authenticate, adminAuth, validateRequest(productSchema),addProductController);
 router.get("/", getAllProductsController); 
+router.get("/search",validateRequest(searchAndFilterSchema), searchAndFilterProducts); 
 router.get("/:id", getProductByIdController);
 router.patch("/:id", authenticate, adminAuth,validateRequest(updateProductSchema),updateProductController); 
 router.delete("/", authenticate, adminAuth, deleteProductController); 

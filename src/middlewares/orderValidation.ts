@@ -1,11 +1,17 @@
 import Joi from "joi";
 
 export const orderValidationSchema = Joi.object({
-    cart_id: Joi.number().integer().positive().required().messages({
-        "number.base": "Cart ID must be a number.",
-        "number.integer": "Cart ID must be an integer.",
-        "number.positive": "Cart ID must be a positive number.",
-        "any.required": "Cart ID is required."
+    cart_item_ids: Joi.array()
+    .items(Joi.number().integer().positive().required())
+    .min(1)
+    .required()
+    .messages({
+        "array.base": "Cart item IDs must be an array.",
+        "array.min": "At least one cart item ID is required.",
+        "any.required": "Cart item IDs are required.",
+        "number.base": "Each cart item ID must be a number.",
+        "number.integer": "Each cart item ID must be an integer.",
+        "number.positive": "Each cart item ID must be a positive number."
     }),
 
     address_id: Joi.number().integer().positive().required().messages({
