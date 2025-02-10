@@ -194,7 +194,7 @@ class ProductService {
 
         query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
         params.push(limitNum, offset);
-
+        console.log(query);
         try {
             const result = await executeQuery(query, params);
 

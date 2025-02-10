@@ -3,15 +3,41 @@ import { executeQuery, formatResponse } from "../utils/helper";
 export class FeedbackService {
     
     // Helper function to update average rating in products table
+    // private async updateProductRating(product_id: number) {
+    //     try {
+    //         const ratingResult = await executeQuery(
+    //             `SELECT COALESCE(AVG(rating), 0) AS avg_rating FROM feedbacks WHERE product_id = $1`,
+    //             [product_id]
+    //         );
+    //         console.log(ratingResult)
+    //         const avg_rating = Number(ratingResult.data.rows[0].avg_rating).toFixed(2);
+
+    //         await executeQuery(
+    //             `UPDATE products SET average_rating = $1 WHERE product_id = $2`,
+    //             [avg_rating, product_id]
+    //         );
+    //     } catch (error) {
+    //         console.error("Error updating product rating:", error);
+    //     }
+    // }
     private async updateProductRating(product_id: number) {
         try {
             const ratingResult = await executeQuery(
+                //`SELECT COALESCE((SELECT AVG(rating) FROM feedbacks WHERE product_id = $1), 0) AS avg_rating`,
                 `SELECT COALESCE(AVG(rating), 0) AS avg_rating FROM feedbacks WHERE product_id = $1`,
                 [product_id]
             );
-
-            const avg_rating = Number(ratingResult.data.rows[0].avg_rating).toFixed(2);
-
+            
+            console.log("Query Result:", ratingResult);  // Debugging output
+    
+            // Ensure result is not empty before accessing it
+            if (!ratingResult?.data?.length) {
+                console.error("No rating data found for product_id:", product_id);
+                return;
+            }
+    
+            const avg_rating = Number(ratingResult.data[0].avg_rating).toFixed(2);
+    
             await executeQuery(
                 `UPDATE products SET average_rating = $1 WHERE product_id = $2`,
                 [avg_rating, product_id]
@@ -20,6 +46,7 @@ export class FeedbackService {
             console.error("Error updating product rating:", error);
         }
     }
+    
 
     // Add Feedback
     async add(feedback: { user_id: number; product_id: number; rating: number; comment: string }) {
@@ -35,21 +62,25 @@ export class FeedbackService {
                 [product_id, user_id, "Delivered"]
             );
 
-            if (orderCheck.data.rowCount === 0) {
+            if (orderCheck.data.length === 0) {
                 return formatResponse(true, "You can only leave feedback for products you have purchased.");
             }
-
+            //check if feedback already exists
+            const checkFeedBack = await executeQuery(`select * from feedbacks where product_id=$1 and user_id=$2`,[product_id,user_id]);
+            if(checkFeedBack.data.length == 1){
+                return await this.update(checkFeedBack.data[0].feedback_id,user_id,{rating,comment});
+            }
             // Insert Feedback
             const result = await executeQuery(
                 `INSERT INTO feedbacks (user_id, product_id, rating, comment, created_at)
                  VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
                 [user_id, product_id, rating, comment]
             );
-
             await this.updateProductRating(product_id);
-
-            return formatResponse(false, "Feedback added successfully", result.data.rows[0]);
+            
+            return formatResponse(false, "Feedback added successfully", result.data[0]);
         } catch (error: any) {
+            console.log(error);
             return formatResponse(true, error.message);
         }
     }
@@ -58,7 +89,7 @@ export class FeedbackService {
     async getAll() {
         try {
             const result = await executeQuery(`SELECT * FROM feedbacks ORDER BY created_at DESC`);
-            return formatResponse(false, "Feedbacks retrieved successfully", result.data.rows);
+            return formatResponse(false, "Feedbacks retrieved successfully", result.data);
         } catch (error: any) {
             return formatResponse(true, error.message);
         }
@@ -71,7 +102,7 @@ export class FeedbackService {
                 `SELECT * FROM feedbacks WHERE product_id = $1 ORDER BY created_at DESC`,
                 [product_id]
             );
-            return formatResponse(false, "Product feedback retrieved successfully", result.data.rows);
+            return formatResponse(false, "Product feedback retrieved successfully", result.data);
         } catch (error: any) {
             return formatResponse(true, error.message);
         }
@@ -145,10 +176,11 @@ export class FeedbackService {
             }
     
             // Update product rating after feedback update
-            await this.updateProductRating(feedbackCheck.data.rows[0].product_id);
+            await this.updateProductRating(feedbackCheck.data[0].product_id);
     
-            return formatResponse(false, "Feedback updated successfully", result.data.rows[0]);
+            return formatResponse(false, "Feedback updated successfully", result.data[0]);
         } catch (error: any) {
+            console.log(error);
             return formatResponse(true, error.message);
         }
     }
@@ -166,7 +198,7 @@ export class FeedbackService {
                 return formatResponse(true, "Unauthorized: You can only delete your own feedback");
             }
 
-            const product_id = feedbackCheck.data.rows[0].product_id;
+            const product_id = feedbackCheck.data[0].product_id;
 
             // Delete feedback
             await executeQuery(`DELETE FROM feedbacks WHERE feedback_id = $1`, [feedback_id]);
