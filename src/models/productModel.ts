@@ -29,33 +29,7 @@ class ProductService {
         return formatResponse(false, "Product retrieved successfully", result.data[0]);
     }
 
-    // async updateProduct(
-    //     product_id: number,
-    //     category_id?: number,
-    //     name?: string,
-    //     description?: string,
-    //     price?: number,
-    //     stock?: number
-    // ) {
-    //     const query = `
-    //         UPDATE products 
-    //         SET category_id = COALESCE($2, category_id),
-    //             name = COALESCE($3, name),
-    //             description = COALESCE($4, description),
-    //             price = COALESCE($5, price),
-    //             stock = COALESCE($6, stock),
-    //             updated_at = NOW()
-    //         WHERE product_id = $1
-    //         RETURNING *`;
-
-    //     const result = await executeQuery(query, [product_id, category_id, name, description, price, stock]);
-
-    //     if (!result.data || result.data.length === 0) {
-    //         return formatResponse(true, "Product not found or no changes made", null);
-    //     }
-
-    //     return formatResponse(false, "Product updated successfully", result.data[0]);
-    // }
+    
 
     async updateProduct(product_id: number, updates: Partial<{ 
         category_id: number; 

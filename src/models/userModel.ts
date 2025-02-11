@@ -22,23 +22,7 @@ export class UserService {
         return formatResponse(false, "User retrieved successfully", result.data[0]);
     }
 
-    // Update user details (first name, last name)
-    // async updateUser(userId: number, firstName?: string, lastName?: string) {
-    //     const result = await executeQuery(
-    //         `UPDATE users 
-    //          SET first_name = COALESCE($2, first_name), 
-    //              last_name = COALESCE($3, last_name) 
-    //          WHERE user_id = $1 
-    //          RETURNING first_name, last_name, email, role`,
-    //         [userId, firstName, lastName]
-    //     );
-
-    //     if (!result.data || result.data.length === 0) {
-    //         return formatResponse(true, "User not found or no changes applied", null);
-    //     }
-
-    //     return formatResponse(false, "User updated successfully", result.data[0]);
-    // }
+    
     async updateUser(userId: number, updates: Partial<{ first_name: string; last_name: string }>) {
         try {
             if (Object.keys(updates).length === 0) {

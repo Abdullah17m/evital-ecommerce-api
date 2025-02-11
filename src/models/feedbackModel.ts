@@ -2,24 +2,6 @@ import { executeQuery, formatResponse } from "../utils/helper";
 
 export class FeedbackService {
     
-    // Helper function to update average rating in products table
-    // private async updateProductRating(product_id: number) {
-    //     try {
-    //         const ratingResult = await executeQuery(
-    //             `SELECT COALESCE(AVG(rating), 0) AS avg_rating FROM feedbacks WHERE product_id = $1`,
-    //             [product_id]
-    //         );
-    //         console.log(ratingResult)
-    //         const avg_rating = Number(ratingResult.data.rows[0].avg_rating).toFixed(2);
-
-    //         await executeQuery(
-    //             `UPDATE products SET average_rating = $1 WHERE product_id = $2`,
-    //             [avg_rating, product_id]
-    //         );
-    //     } catch (error) {
-    //         console.error("Error updating product rating:", error);
-    //     }
-    // }
     private async updateProductRating(product_id: number) {
         try {
             const ratingResult = await executeQuery(
